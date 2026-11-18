@@ -157,7 +157,7 @@ tbody tr:hover{background:var(--panel2);}
         이력 불러오기
         <input type="file" id="historyFileInput" accept=".json">
       </button>
-      <button class="file-btn file-btn-ghost" id="downloadHistoryBtn" type="button">이력 저장</button>
+      <button class="file-btn file-btn-ghost" id="downloadHistoryBtn" type="button">공유용 파일 저장</button>
       <button class="file-btn">
         엑셀 새로 불러오기
         <input type="file" id="fileInput" accept=".xlsx,.xls">
@@ -221,7 +221,7 @@ tbody tr:hover{background:var(--panel2);}
 
   <div class="panel stock-panel" style="margin-bottom:20px;">
     <h3>재고 부족 추적 &amp; 회복 현황 <span style="font-weight:400;color:var(--ink-soft);font-size:12.5px;">— SVC품명 × 세부조직 기준</span></h3>
-    <p class="panel-sub">아산재고유형이 재고없음·재고부족이었던 항목이 재고보유로 전환되면 자동으로 회복 목록에 반영됩니다. 이력은 브라우저 저장이 아닌 JSON 파일로 관리되니, 새 엑셀을 불러오기 전에 이전에 저장한 이력 파일을 먼저 불러와주세요.</p>
+    <p class="panel-sub">아산재고유형이 재고없음·재고부족이었던 항목이 재고보유로 전환되면 자동으로 회복 목록에 반영됩니다. 이력은 stock_history.json 파일로 관리됩니다. GitHub에 올린 상태에서 열면 이전 이력이 자동으로 이어지고, 새 엑셀을 불러온 뒤 "공유용 파일 저장"으로 갱신본을 다시 올려주세요.</p>
 
     <div class="stock-kpis">
       <div class="stock-kpi"><b id="stockTrackedCount">–</b><span>현재 추적 중</span></div>
@@ -339,15 +339,37 @@ var trendMode = "day";    // day | month
 var currentSort = "d3rate_asc";
 var currentSearch = "";
 
+function fetchJson(url){
+  return fetch(url + "?v=" + Date.now(), { cache:"no-store" })
+    .then(function(res){ if (!res.ok) throw new Error(res.status); return res.json(); })
+    .catch(function(){ return null; });
+}
+
+// 1순위: HTML과 같은 폴더의 shipment_data.json / stock_history.json (GitHub 공유용)
+// 2순위: HTML 안에 내장된 샘플 데이터 (파일이 없거나 로컬에서 직접 열 때)
 function loadEmbedded(){
+  var embedded = [];
   try{
-    var el = document.getElementById("embedded-data");
-    var parsed = JSON.parse(el.textContent);
-    rawData = parsed;
-    render();
+    embedded = JSON.parse(document.getElementById("embedded-data").textContent);
   }catch(e){
     console.error("embedded data parse failed", e);
   }
+  Promise.all([ fetchJson("shipment_data.json"), fetchJson("stock_history.json") ]).then(function(res){
+    var ship = res[0], hist = res[1];
+    if (ship && !Array.isArray(ship) && Array.isArray(ship.rows)) ship = ship.rows;
+    if (hist && hist.tracked && hist.resolved) baselineHistory = hist;
+    rawData = (Array.isArray(ship) && ship.length) ? ship : embedded;
+    render();
+  });
+}
+
+function saveJsonFile(obj, filename){
+  var blob = new Blob([JSON.stringify(obj)], {type:"application/json"});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function normalizeRow(r){
@@ -535,18 +557,11 @@ document.getElementById("historyFileInput").addEventListener("change", function(
 });
 
 document.getElementById("downloadHistoryBtn").addEventListener("click", function(){
-  if (!displayHistory){ alert("먼저 엑셀 데이터를 불러와주세요."); return; }
-  var blob = new Blob([JSON.stringify(displayHistory, null, 2)], {type:"application/json"});
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement("a");
-  a.href = url;
-  a.download = "재고추적이력_" + (displayHistory.updatedAt || "snapshot") + ".json";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  if (!rawData.length || !displayHistory){ alert("먼저 엑셀 데이터를 불러와주세요."); return; }
+  saveJsonFile(rawData, "shipment_data.json");
+  setTimeout(function(){ saveJsonFile(displayHistory, "stock_history.json"); }, 400);
+  alert("shipment_data.json, stock_history.json 2개 파일을 저장합니다.\n(브라우저가 여러 파일 다운로드 허용을 물으면 '허용'을 눌러주세요)\n\n두 파일을 GitHub의 index.html과 같은 폴더에 올리면 다른 사람에게도 같은 데이터가 보입니다.");
 });
-
 function typeCounts(data){
   var counts = {};
   TYPE_ORDER.forEach(function(t){ counts[t] = 0; });
